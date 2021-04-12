@@ -72,21 +72,27 @@ class SVGExplorer(implicit w: Window) {
 //    canvas.height = viewBox(3)
 //    gc.fillRect(viewBox(0), viewBox(1), viewBox(2), viewBox(3))
 
+    val transformRegex = "(\\S+)\\(([^)]*)\\)".r
     svg.xml.child map {
       case g @ Elem(_,"g",attr,_,_*) => {
-        val transform = attr.get("transform") getOrElse ""
-        println(transform)
-        val translate = (0.0, 1449.0/2) //(0, 256)
-        val scale = (0.05, -0.05) //(0.1, -0.1)
-        def xform = (x: Double, y: Double, xlate: Boolean) =>
-          if (xlate) ((x * scale._1) + translate._1, (y * scale._2) + translate._2)
-          else (x * scale._1, y * scale._2)
+        val transform = transformRegex.findAllMatchIn(
+          (attr.get("transform") getOrElse "").toString
+        ).map( m => (
+          m.group(1) -> m.group(2).split("[,\\s]").map(x => x.toDouble).toSeq)
+        ).toMap
+
+        def translate: ((Double, Double)) => (Double, Double) = (coords: (Double, Double)) => (coords._1 + transform("translate")(0), coords._2 + transform("translate")(1))
+        def scale: ((Double, Double)) => (Double, Double) = (coords: (Double, Double)) => (coords._1 * transform("scale")(0), coords._2 * transform("scale")(1))
+        val xforms = Map(
+          "translate" -> translate,
+          "scale" -> scale
+        )
 
         g.child map {
           case Elem(_,"path",attr,_,_*) => {
             gc.beginPath()
             val spaces = (attr.get("d") getOrElse "").toString.split("(?=[z])").mkString(" ")
-            doPath(gc, spaces, xform, 0.0, 0.0)
+            doPath(gc, spaces, xforms, 0.0, 0.0)
           }
 //          case t => println("Unknown tag2: " + t.label)
           case _ =>
@@ -100,11 +106,11 @@ class SVGExplorer(implicit w: Window) {
 
   val letterRegex = """[a-zA-Z]""".r
 
-  def doPath(gc: GraphicsContext, path: String, xform: (Double, Double, Boolean)=>(Double, Double), cx: Double, cy: Double): Unit = {
+  def doPath(gc: GraphicsContext, path: String, xform: Map[String,((Double, Double))=>(Double,Double)], cx: Double, cy: Double): Unit = {
     path match {
       case s"M${x} ${y} ${extra}" => {
-        println(s"MOVE ${extra}")
-        val nc = xform(x.toDouble, y.toDouble, true)
+//        println(s"MOVE ${extra}")
+        val nc = xform("translate")(xform("scale") (x.toDouble, y.toDouble))
         gc.moveTo(nc._1, nc._2)
         extra(0) match {
           case letterRegex(_*) => doPath(gc, extra, xform, nc._1, nc._2)
@@ -112,8 +118,8 @@ class SVGExplorer(implicit w: Window) {
         }
       }
       case s"m${x} ${y} ${extra}" => {
-        println(s"MOVE ${extra}")
-        val nc = xform(x.toDouble, y.toDouble, false)
+//        println(s"MOVE ${extra}")
+        val nc = xform("scale") (x.toDouble, y.toDouble)
         gc.moveTo(nc._1+cx, nc._2+cy)
         extra(0) match {
           case letterRegex(_*) => doPath(gc, extra, xform, nc._1+cx, nc._2+cy)
@@ -121,10 +127,10 @@ class SVGExplorer(implicit w: Window) {
         }
       }
       case s"c${x1} ${y1} ${x2} ${y2} ${dx} ${dy} ${extra}" => {
-        println(s"cubic ${extra}")
-        val one = xform(x1.toDouble, y1.toDouble, false)
-        val two = xform(x2.toDouble, y2.toDouble, false)
-        val del = xform(dx.toDouble, dy.toDouble, false)
+//        println(s"cubic ${extra}")
+        val one = xform("scale") (x1.toDouble, y1.toDouble)
+        val two = xform("scale") (x2.toDouble, y2.toDouble)
+        val del = xform("scale") (dx.toDouble, dy.toDouble)
         gc.bezierCurveTo(one._1+cx, one._2+cy, two._1+cx, two._2+cy, del._1+cx, del._2+cy)
         extra(0) match {
           case letterRegex() => doPath(gc, extra, xform, del._1+cx, del._2+cy)
@@ -132,8 +138,8 @@ class SVGExplorer(implicit w: Window) {
         }
       }
       case s"l${x1} ${y1} ${extra}" => {
-        println(s"line ${extra}")
-        val nc = xform(x1.toDouble, y1.toDouble, false)
+//        println(s"line ${extra}")
+        val nc = xform("scale") (x1.toDouble, y1.toDouble)
         gc.lineTo(nc._1+cx, nc._2+cy)
         extra(0) match {
           case letterRegex() => doPath(gc, extra, xform, nc._1+cx, nc._2+cy)
@@ -141,8 +147,8 @@ class SVGExplorer(implicit w: Window) {
         }
       }
       case s"L${x1} ${y1} ${extra}" => {
-        println(s"LINE ${extra}")
-        val nc = xform(x1.toDouble, y1.toDouble, true)
+//        println(s"LINE ${extra}")
+        val nc = xform("translate")(xform("scale") (x1.toDouble, y1.toDouble))
         gc.lineTo(nc._1, nc._2)
         extra(0) match {
           case letterRegex() => doPath(gc, extra, xform, nc._1, nc._2)
@@ -150,15 +156,15 @@ class SVGExplorer(implicit w: Window) {
         }
       }
       case s"z ${extra}" => {
-        println("FIN")
+//        println("FIN")
 //        gc.fill ()
         gc.stroke ()
         gc.closePath()
         doPath(gc, extra, xform, cx, cy)
       }
       case "z" => {
-        println("FIN")
-//        gc.fill()
+//        println("FIN")
+        gc.fill()
         gc.stroke()
         gc.closePath()
       }
